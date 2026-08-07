@@ -3,9 +3,8 @@ kind: Ingress
 metadata:
   name: community-backend
   namespace: default
-spec: 
+spec:
   ingressClassName: nginx
-
   rules:
     - http:
         paths:

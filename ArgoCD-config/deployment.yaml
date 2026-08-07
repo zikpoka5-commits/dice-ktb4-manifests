@@ -1,124 +1,72 @@
-# ============================================================================
-# deployment.yaml — 앱 본체. "무엇을, 몇 개, 어디에, 어떻게 띄울지"의 전부.
-#
-# 이 파일의 모든 값은 지금 클러스터에 4일째 떠 있는 Deployment에서 그대로 뽑은 것.
-# ( kubectl get deployment community-backend -o yaml 결과에서 런타임 정보만 제거 )
-# 그래서 ArgoCD가 이걸 처음 읽어도 "바꿀 게 없음(diff 0)" 이 된다.
-# ============================================================================
-apiVersion: apps/v1        # Deployment 는 apps 그룹 v1 에 속한다 (고정값, 외울 필요 없음)
-kind: Deployment           # 이 문서가 만드는 리소스 종류 = Deployment
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: community-backend  # 이 Deployment 의 이름. 클러스터 안에서 유일해야 한다.
-  namespace: default       # default 네임스페이스에 배포. (앱은 전부 default 에 있음)
+  name: community-backend
+  namespace: default
   labels:
-    app: community-backend # Deployment 자체에 붙는 꼬리표. (관리/조회용)
-
-spec:                      # ↓ 여기서부터 "어떻게 배포할지" 실제 명세
-  replicas: 2              # 파드를 항상 2개 유지한다.
-                           #   왜 2개? 무중단 배포 때문. 하나를 새 버전으로 교체하는
-                           #   동안 나머지 하나가 요청을 받아야 서비스가 안 끊긴다.
-                           #   1개면 교체 순간 서비스 공백이 생긴다.
-
-  selector:                # 이 Deployment 가 "내 파드"라고 인식할 기준.
+    app: community-backend
+spec:
+  replicas: 2
+  selector:
     matchLabels:
-      app: community-backend   # app=community-backend 라벨이 붙은 파드를 내 것으로 관리.
-                               # ↓ 아래 template 의 라벨과 반드시 일치해야 한다.
-
-  strategy:                # 새 버전으로 교체할 때의 방식.
-    type: RollingUpdate    # 하나씩 점진적으로 교체 (전부 죽였다 새로 띄우는 게 아님).
+      app: community-backend
+  strategy:
+    type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1          # 교체 중 정원(2)보다 최대 1개까지 초과 생성 허용 → 순간 3개까지.
-      maxUnavailable: 0    # 교체 중 죽어있어도 되는 파드 = 0개.
-                           #   즉 새 파드가 "준비 완료" 되기 전엔 기존 파드를 절대 안 내린다.
-                           #   이 조합(surge1 + unavailable0)이 "진짜 무중단"의 핵심.
-
-  template:                # ↓ 여기서부터 "파드 한 개를 어떻게 만들지" 설계도.
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
     metadata:
       labels:
-        app: community-backend   # 파드에 붙는 라벨. 위 selector, 그리고 Service 가 이걸 보고 찾는다.
+        app: community-backend
     spec:
-      # ---- 배치 규칙: 이 앱은 반드시 application 노드(worker2)에만 뜬다 ----
       nodeSelector:
-        node-role: application   # node-role=application 라벨이 붙은 노드에만 스케줄.
-                                 #   이게 없으면 스케줄러가 worker1(Jenkins 노드)에 앱을 얹을 수 있고,
-                                 #   그러면 빌드 시 메모리 경합 → Jenkins 장애(Phase 9 사고)가 재연된다.
-                                 #   ★ patch 로 걸지 말고 이렇게 파일에 직접 박아야 ArgoCD 가 안 지운다.
-
+        node-role: application
       containers:
-        - name: backend                          # 컨테이너 이름 (파드 안 컨테이너 식별용)
-          image: dice3059/dice-backend:0.0.2     # 이 이미지로 컨테이너를 띄운다.
-                                                 #   ★ 지금은 0.0.2. 나중에 Jenkins 가 새 빌드마다
-                                                 #     이 태그를 '빌드번호-SHA' 로 자동 교체(write-back)한다.
-                                                 #     (정확히는 kustomization.yaml 의 newTag 를 통해 교체)
-          imagePullPolicy: IfNotPresent          # 노드에 이미 같은 태그 이미지가 있으면 다시 안 받는다.
-
+        - name: backend
+          image: dice3059/dice-backend:0.0.2
+          imagePullPolicy: IfNotPresent
           ports:
-            - name: http           # 이 포트에 'http' 라는 이름을 붙인다.
-              containerPort: 8081   # 앱(Spring Boot)이 실제로 듣는 포트.
+            - name: http
+              containerPort: 8081
               protocol: TCP
-                                    #   ↑ 이름(http)을 붙여두면 Service/Probe 에서 숫자 대신
-                                    #     'http' 로 참조할 수 있다. 포트 번호가 바뀌어도 안 깨진다.
-
-          # ---- 설정값 주입: 앱이 켜질 때 환경변수로 읽는다 ----
           envFrom:
             - configMapRef:
-                name: community-backend-config    # ConfigMap 의 모든 키를 환경변수로 주입 (프로필, CORS)
+                name: community-backend-config
             - secretRef:
-                name: community-backend-secret    # Secret 의 키도 환경변수로 주입 (DB 비밀번호)
-                                                  #   ★ 이 Secret 은 config repo(Git)에 없다.
-                                                  #     비밀번호를 Git 에 안 올리려고 일부러 뺐고,
-                                                  #     클러스터에는 이미 만들어져 있다(4d 확인됨).
-
-          # ---- 리소스: 이 컨테이너가 쓸 수 있는 CPU/메모리 ----
+                name: community-backend-secret
           resources:
-            requests:              # "최소 이만큼은 보장해줘" (스케줄러가 배치 계산에 쓰는 값)
-              cpu: 200m            #   0.2 vCPU
+            requests:
+              cpu: 200m
               memory: 256Mi
-            limits:                # "이 이상은 못 쓴다" (상한)
-              cpu: "1"             #   1 vCPU
-              memory: 1Gi          #   메모리 상한. 넘으면 OOMKilled.
-
-          # ---- 건강검진 3종: kubelet 이 컨테이너 상태를 판단하는 기준 ----
-          # 순서: startup(다 켜졌나?) → readiness(요청 받을 준비?) → liveness(살아있나?)
-          startupProbe:            # ① 기동이 끝났는지 확인. 이게 성공하기 전엔 아래 둘은 실행 안 됨.
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          startupProbe:
             httpGet:
               path: /actuator/health/liveness
               port: http
-            periodSeconds: 5       # 5초마다 검사
-            failureThreshold: 30   # 30번까지 실패 허용 → 최대 150초(5×30) 기동 대기.
-                                   #   Spring Boot 는 켜지는 데 20~40초 걸려서 이 여유가 필요.
-                                   #   없으면 "아직 뜨는 중인데 죽었다" 오해 → 무한 재시작(CrashLoop).
-
-          readinessProbe:          # ② 요청 받을 준비가 됐는지. 실패하면 Service 에서 잠깐 빼기만 함(안 죽임).
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
             httpGet:
               path: /actuator/health/readiness
               port: http
             periodSeconds: 10
-            failureThreshold: 3    # 3번 연속 실패하면 트래픽에서 제외. 회복되면 자동 복귀.
-
-          livenessProbe:           # ③ 아예 죽었는지. 실패하면 컨테이너를 재시작.
+            failureThreshold: 3
+          livenessProbe:
             httpGet:
               path: /actuator/health/liveness
               port: http
-            periodSeconds: 20      # readiness(10초)보다 느슨하게(20초).
-            failureThreshold: 3    #   너무 민감하면 잠깐 느려진 것만으로 멀쩡한 컨테이너를 죽인다.
-
-          # ---- 종료 유예: 파드가 죽을 때 트래픽이 빠질 때까지 잠깐 기다림 ----
+            periodSeconds: 20
+            failureThreshold: 3
           lifecycle:
             preStop:
               exec:
                 command: ["sh", "-c", "sleep 5"]
-                # 파드 종료 시 "엔드포인트 제거"와 "종료 신호"가 동시에 시작되는데,
-                # 제거가 전파되는 데 1~2초 걸린다. 그 사이 새 요청이 죽는 파드로 가면 실패.
-                # 5초 기다려서 그 틈을 막는다. (실측: 실패율 1.16% → 0%)
-
-          # ---- 업로드 파일 저장 위치 ----
           volumeMounts:
             - name: upload-volume
-              mountPath: /tmp/uploads   # 컨테이너 안 이 경로에 볼륨을 붙인다.
-
+              mountPath: /tmp/uploads
       volumes:
         - name: upload-volume
-          emptyDir: {}       # 파드 수명 동안만 존재하는 임시 저장소.
-                             #   ⚠️ 파드가 지워지면 사라지고, 파드끼리 공유도 안 된다.
-                             #     지금은 임시. 나중에 S3 나 공유 볼륨(PVC)으로 바꿔야 한다.
+          emptyDir: {}
