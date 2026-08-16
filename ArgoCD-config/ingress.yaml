@@ -6,7 +6,9 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    - http:
+    # 한글 도메인 다이스.커뮤니티.한국 의 퓨니코드 표현
+    - host: xn--2j1bs21ausd.xn--9i1b01onwqqzd.xn--3e0b707e
+      http:
         paths:
           - path: /
             pathType: Prefix
