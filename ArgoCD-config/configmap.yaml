@@ -19,6 +19,6 @@ data:
   REDIS_HOST: "redis"
   REDIS_PORT: "6379"
 
-  # ⚠️ 아래 버킷 이름을 실제로 만든 S3 버킷 이름으로 바꿔야 한다.
-  S3_BUCKET: "CHANGE-ME-bucket-name"
+  # 업로드 이미지가 저장되는 S3 버킷 (읽기만 공개, 업로드는 IAM 키를 가진 백엔드만)
+  S3_BUCKET: "dice-community-uploads"
   S3_REGION: "ap-northeast-2"
