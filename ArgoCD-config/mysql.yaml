@@ -1,0 +1,108 @@
+# 데이터베이스.
+#
+# 왜 Deployment가 아니라 StatefulSet인가:
+#   DB는 "저장된 데이터가 곧 정체성"이라 아무 Pod로나 갈아끼울 수 없다.
+#   StatefulSet은 Pod 이름(mysql-0)과 볼륨이 1:1로 고정되어, 재시작해도 같은 데이터를 다시 붙잡는다.
+#
+# 왜 replicas가 1인가:
+#   MySQL은 여러 Pod를 띄운다고 자동으로 복제되지 않는다 (복제 설정이 따로 필요).
+#   지금 필요한 것은 "여러 백엔드 Pod가 같은 데이터를 본다"이고, 그건 1개로 충분하다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: default
+spec:
+  # 백엔드는 이 이름(mysql)으로 접속한다: jdbc:mysql://mysql:3306/crud
+  # 클러스터 안에서만 보이므로 외부에서 DB에 직접 접근할 수 없다.
+  clusterIP: None      # headless: StatefulSet의 Pod에 안정적으로 연결하기 위한 관례
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  namespace: default
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      nodeSelector:
+        node-role: application
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          args:
+            # 이모지까지 저장할 수 있는 문자셋으로 고정한다 (ddl.sql과 동일)
+            - --character-set-server=utf8mb4
+            - --collation-server=utf8mb4_0900_ai_ci
+          ports:
+            - name: mysql
+              containerPort: 3306
+          env:
+            # 비밀번호는 매니페스트에 쓰지 않는다. 클러스터의 Secret에서 가져온다.
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: community-backend-secret
+                  key: DB_PASSWORD
+            - name: MYSQL_DATABASE
+              value: crud
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+            - name: initdb
+              # 이 디렉터리의 .sql 파일은 "데이터가 비어 있는 최초 기동" 때 자동 실행된다.
+              # 덕분에 테이블 생성을 사람이 따로 하지 않아도 된다.
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          # 최초 기동은 스키마 생성까지 하느라 오래 걸린다. 그동안 아래 두 probe는 대기한다.
+          startupProbe:
+            exec:
+              command: ["bash", "-c", "mysqladmin ping -h127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
+            periodSeconds: 5
+            failureThreshold: 36     # 최대 3분
+          readinessProbe:
+            exec:
+              command: ["bash", "-c", "mysqladmin ping -h127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["bash", "-c", "mysqladmin ping -h127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\""]
+            periodSeconds: 20
+            failureThreshold: 3
+      volumes:
+        - name: initdb
+          configMap:
+            name: mysql-initdb
+  # Pod가 재시작돼도 이 볼륨은 유지된다 → 데이터가 살아남는다.
+  # (H2 인메모리와의 결정적 차이)
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi

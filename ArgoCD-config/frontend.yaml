@@ -1,0 +1,88 @@
+# 프론트엔드 (express 정적 파일 서버).
+#
+# 백엔드와 같은 도메인에서 서빙된다. Ingress가 경로로 나눠주므로
+# 브라우저 입장에서는 출처가 하나뿐이고, 그래서 CORS 설정이 필요 없다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: community-frontend-svc
+  namespace: default
+spec:
+  type: ClusterIP      # 외부 노출은 Ingress가 담당한다
+  selector:
+    app: community-frontend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: community-frontend
+  namespace: default
+  labels:
+    app: community-frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: community-frontend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0   # 새 Pod가 준비된 뒤에 기존 Pod를 내린다 (무중단)
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: community-frontend
+    spec:
+      nodeSelector:
+        node-role: application
+      containers:
+        - name: frontend
+          # 실제 태그는 kustomization.yaml이 덮어쓴다 (Jenkins가 빌드할 때마다 갱신)
+          image: dice3059/dice-frontend:0.0.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # 비워두면 프론트가 상대 경로로 API를 호출한다 (같은 도메인의 /v1/...).
+            # 값을 넣으면 그 주소로 호출하므로, 백엔드를 다른 도메인에 두는 경우에만 채운다.
+            - name: API_BASE_URL
+              value: ""
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "192Mi"
+          # /config.js 는 express가 항상 즉시 응답하는 경로라 상태 확인에 적합하다
+          startupProbe:
+            httpGet:
+              path: /config.js
+              port: http
+            periodSeconds: 3
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: /config.js
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /config.js
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          # 엔드포인트 제거가 전파되기 전에 종료되면 그 사이 요청이 실패한다
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]

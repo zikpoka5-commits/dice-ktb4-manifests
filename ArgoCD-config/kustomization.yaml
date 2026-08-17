@@ -6,7 +6,27 @@ resources:
   - service.yaml
   - deployment.yaml
   - ingress.yaml
+  - mysql.yaml
+  - redis.yaml
+  - frontend.yaml
 
+# db/ddl.sql을 ConfigMap으로 만들어 MySQL의 초기화 디렉터리에 넣는다.
+# MySQL은 데이터가 비어 있는 최초 기동 때 이 스크립트를 자동 실행하므로,
+# 사람이 접속해서 테이블을 만들 필요가 없다.
+configMapGenerator:
+  - name: mysql-initdb
+    files:
+      - ddl.sql
+
+generatorOptions:
+  # 이름 뒤에 해시를 붙이지 않는다.
+  # 해시가 붙으면 ddl.sql을 고칠 때마다 MySQL이 재시작되는데,
+  # 초기화 스크립트는 최초 1회만 실행되므로 재시작해도 스키마는 바뀌지 않는다.
+  disableNameSuffixHash: true
+
+# Jenkins가 빌드할 때마다 아래 newTag를 갱신하고, ArgoCD가 그 변경을 감지해 배포한다.
 images:
   - name: dice3059/dice-backend
     newTag: "9-ac1976e"
+  - name: dice3059/dice-frontend
+    newTag: "0.0.1"

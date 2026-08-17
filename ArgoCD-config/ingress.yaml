@@ -1,8 +1,20 @@
+# 하나의 도메인을 경로로 나눠 프론트와 백엔드에 배분한다.
+#
+#   /v1/...      → 백엔드 API
+#   /actuator/...→ 백엔드 상태 확인
+#   그 외 전부    → 프론트엔드 (화면)
+#
+# nginx는 더 긴 경로를 우선 매칭하므로 /v1 이 / 보다 먼저 잡힌다.
+# 프론트와 백엔드가 같은 출처가 되어 CORS 설정도, 쿠키 전달 문제도 사라진다.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: community-backend
   namespace: default
+  annotations:
+    # 업로드 이미지가 5MB까지 허용되므로 nginx도 같은 크기를 통과시켜야 한다.
+    # 기본값(1MB)이면 그보다 큰 사진이 413으로 막힌다.
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
 spec:
   ingressClassName: nginx
   rules:
@@ -10,10 +22,24 @@ spec:
     - host: xn--2j1bs21ausd.xn--9i1b01onwqqzd.xn--3e0b707e
       http:
         paths:
-          - path: /
+          - path: /v1
             pathType: Prefix
             backend:
               service:
                 name: community-backend-svc
                 port:
                   number: 8081
+          - path: /actuator
+            pathType: Prefix
+            backend:
+              service:
+                name: community-backend-svc
+                port:
+                  number: 8081
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: community-frontend-svc
+                port:
+                  number: 8080

@@ -1,0 +1,74 @@
+# 세션 저장소.
+#
+# 왜 필요한가:
+#   로그인 정보(세션)를 백엔드 Pod의 메모리에 두면, 요청이 다른 Pod로 갈 때마다
+#   "로그인한 적 없는 사람"이 되어 화면이 로그인 페이지로 튕긴다.
+#   세션을 Redis 한 곳에 모아두면 어느 Pod가 받든 같은 로그인 상태를 본다.
+#
+# 볼륨을 붙이지 않은 이유:
+#   세션은 원래 30분이면 만료되는 임시 데이터다. Redis가 재시작되면 다시 로그인하면 된다.
+#   (데이터베이스와 달리 영구 보관할 가치가 없다)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: default
+spec:
+  type: ClusterIP      # 클러스터 안에서만 접근 가능
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: default
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  strategy:
+    # 세션 저장소는 두 개가 동시에 뜨면 일부 세션만 보이는 상태가 되므로
+    # 새 Pod를 띄우기 전에 기존 Pod를 내린다.
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      nodeSelector:
+        node-role: application
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args:
+            # 메모리가 가득 차면 오래된 세션부터 버린다 (서버가 죽는 것보다 낫다)
+            - --maxmemory
+            - "200mb"
+            - --maxmemory-policy
+            - allkeys-lru
+          ports:
+            - name: redis
+              containerPort: 6379
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 20
