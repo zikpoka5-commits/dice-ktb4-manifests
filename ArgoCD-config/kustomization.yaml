@@ -29,4 +29,4 @@ images:
   - name: dice3059/dice-backend
     newTag: "9-ac1976e"
   - name: dice3059/dice-frontend
-    newTag: "0.0.1"
+    newTag: "1-560c253"
