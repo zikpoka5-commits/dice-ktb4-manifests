@@ -29,4 +29,4 @@ images:
   - name: dice3059/dice-backend
     newTag: "10-01cf878"
   - name: dice3059/dice-frontend
-    newTag: "2-aae26b2"
+    newTag: "3-f663ce4"
