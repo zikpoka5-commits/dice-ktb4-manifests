@@ -27,6 +27,6 @@ generatorOptions:
 # Jenkins가 빌드할 때마다 아래 newTag를 갱신하고, ArgoCD가 그 변경을 감지해 배포한다.
 images:
   - name: dice3059/dice-backend
-    newTag: "9-ac1976e"
+    newTag: "10-01cf878"
   - name: dice3059/dice-frontend
     newTag: "1-560c253"
